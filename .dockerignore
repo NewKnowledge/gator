@@ -1,0 +1,26 @@
+# What should we not copy into the container?
+
+# mount volumes for data storage instead
+**/data/
+**/plots/
+
+__pycache__/
+.vscode/
+.keras/
+.ivy2/
+.cache/
+.config/
+.jupyter/
+.local/
+.pytest_cache/
+.ipython/
+.ipynb_checkpoints/
+
+# npm
+node_modules
+package-lock.json
+
+.gitignore
+Dockerfile
+*.dockerfile
+Jenkinsfile

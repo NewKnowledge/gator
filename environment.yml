@@ -1,0 +1,9 @@
+name: base
+channels:
+- defaults
+dependencies:
+- pytest
+- pandas
+- pip:
+  - git+https://github.com/NewKnowledge/imagenet.git@24e605be4f32336ab888f48ae37da95a3dd5d1df#egg=nk_imagenet
+

@@ -1,0 +1,18 @@
+version: '3'
+
+services:
+
+  gator:
+    build: .
+    # sensitive env vars (eg db credentials) are kept separate in a ds-service.env file to avoid being committed to the repo
+    # env_file:
+    #     - ds-service.env
+    # we mount a volume so that code changes take effect without needing to restart/rebuild the container. it also allows for data persistence
+    # volumes:
+    #     - .:/root
+    # environment:
+    #     - DATADOG_TRACE_ENABLED=false
+    # you could do the port mapping between container and host here, but we'll do it in the makefile commands instead
+    # ports:
+    #     - 8888:8888
+    #     - 5000:5000
