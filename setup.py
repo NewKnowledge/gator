@@ -5,7 +5,7 @@ setup(
     name='gator',
     version='1.0.1',
     description='Generates Automatic Tags via Object Recognition',
-    packages=['Gator'],
+    packages=['gator'],
     keywords=['d3m_primitive'],
     install_requires=[
         'pandas == 0.23.4',        
