@@ -131,7 +131,7 @@ class gator(PrimitiveBase[Inputs, Outputs, Params, Hyperparams]):
     def __init__(self, *, hyperparams: Hyperparams, random_seed: int = 0, volumes: typing.Dict[str,str]=None)-> None:
         super().__init__(hyperparams=hyperparams, random_seed=random_seed,  volumes=volumes)
         
-        self.ImageNet = ImagenetModel(weights = self.volumes["croc_weights"]+"/inception_v3_weights_tf_dim_ordering_tf_kernels.h5", pooling = self.hyperparams['pooling'])
+        self.ImageNet = ImagenetModel(weights = self.volumes["croc_weights"]+"/inception_v3_weights_tf_dim_ordering_tf_kernels_notop.h5", pooling = self.hyperparams['pooling'])
         self.image_paths = None
         self.image_labels = None
         self.class_weights = None
