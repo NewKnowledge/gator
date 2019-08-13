@@ -29,12 +29,6 @@ class Hyperparams(hyperparams.Hyperparams):
         semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
         description='names of columns with image paths'
     )
-    architecture = hyperparams.Enumeration(
-        default = 'inception_v3', 
-        semantic_types = ['https://metadata.datadrivendiscovery.org/types/TuningParameter'],
-        values = ['inception_v3', 'xception', 'mobilenet_v2'],
-        description = 'architecture of ImageNet CNN'
-    )
     batch_size = hyperparams.UniformInt(
         lower = 1, 
         upper = 256,
@@ -116,7 +110,13 @@ class gator(PrimitiveBase[Inputs, Outputs, Params, Hyperparams]):
                 "package_uri": "git+https://github.com/NewKnowledge/gator.git@{git_commit}#egg=Gator".format(
                     git_commit=utils.current_git_commit(os.path.dirname(__file__))
                 ),
-            }
+            },
+            {
+            "type": "TGZ",
+            "key": "croc_weights",
+            "file_uri": "http://public.datadrivendiscovery.org/croc.tar.gz",
+            "file_digest":"0be3e8ab1568ec8225b173112f4270d665fb9ea253093cd9ea98c412c9053c92"
+            },
         ],
         # The same path the primitive is registered with entry points in setup.py.
         'python_path': 'd3m.primitives.digital_image_processing.imagenet_convolutional_neural_network.Gator',
@@ -131,7 +131,7 @@ class gator(PrimitiveBase[Inputs, Outputs, Params, Hyperparams]):
     def __init__(self, *, hyperparams: Hyperparams, random_seed: int = 0, volumes: typing.Dict[str,str]=None)-> None:
         super().__init__(hyperparams=hyperparams, random_seed=random_seed,  volumes=volumes)
         
-        self.ImageNet = ImagenetModel(pooling = self.hyperparams['pooling'], model = self.hyperparams['architecture'])
+        self.ImageNet = ImagenetModel(weights = self.volumes["croc_weights"]+"/inception_v3_weights_tf_dim_ordering_tf_kernels.h5", pooling = self.hyperparams['pooling'])
         self.image_paths = None
         self.image_labels = None
         self.class_weights = None
