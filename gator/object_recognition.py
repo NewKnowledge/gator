@@ -5,11 +5,11 @@ import numpy as np
 import pandas as pd
 
 from d3m.primitive_interfaces.base import CallResult, PrimitiveBase
-from nkimagenet import ImagenetModel
+from nk_imagenet import ImagenetModel
 
 from d3m import container, utils
 from d3m.container import DataFrame as d3m_DataFrame
-from d3m.metadata import hyperparams, base as metadata_base
+from d3m.metadata import hyperparams, base as metadata_base, params
 from common_primitives import utils as utils_cp
 from sklearn.preprocessing import LabelEncoder
 
@@ -19,6 +19,9 @@ __contact__ = 'mailto:nklabs@newknowledge.io'
 
 Inputs = container.pandas.DataFrame
 Outputs = container.pandas.DataFrame
+
+class Params(params.Params):
+    pass
 
 class Hyperparams(hyperparams.Hyperparams):
     image_columns = hyperparams.Set(
@@ -129,27 +132,13 @@ class gator(PrimitiveBase[Inputs, Outputs, Params, Hyperparams]):
     })
 
     def __init__(self, *, hyperparams: Hyperparams, random_seed: int = 0, volumes: typing.Dict[str,str]=None)-> None:
-        super().__init__(hyperparams=hyperparams, random_seed=random_seed,  volumes=volumes)
-        
-        self.ImageNet = ImagenetModel(weights = self.volumes["croc_weights"]+"/inception_v3_weights_tf_dim_ordering_tf_kernels_notop.h5", pooling = self.hyperparams['pooling'])
+
+        super().__init__(hyperparams=hyperparams, random_seed=random_seed, volumes=volumes)
+        self.ImageNet = ImagenetModel(weights = "/root/.keras/models/inception_v3_weights_tf_dim_ordering_tf_kernels_notop.h5", pooling = self.hyperparams['pooling'])
         self.image_paths = None
         self.image_labels = None
         self.class_weights = None
         self.targets = None
-
-    def _get_column_base_path(self, inputs: Inputs, column_name: str) -> str:
-        # fetches the base path associated with a column given a name if it exists
-        column_metadata = inputs.metadata.query((metadata_base.ALL_ELEMENTS,))
-        if not column_metadata or len(column_metadata) == 0:
-            return None
-
-        num_cols = column_metadata['dimension']['length']
-        for i in range(0, num_cols):
-            col_data = inputs.metadata.query((metadata_base.ALL_ELEMENTS, i))
-            if col_data['name'] == column_name and 'location_base_uris' in col_data:
-                return col_data['location_base_uris'][0]
-
-        return None
 
     def get_params(self) -> Params:
         return self._params
@@ -166,13 +155,11 @@ class gator(PrimitiveBase[Inputs, Outputs, Params, Hyperparams]):
             inputs: column(s) of image paths
             outputs: labels from dataframe's target column
         '''
-
+        
         # create single list of image paths from all target image columns
-        self.image_paths = []
-        for col in self.hyperparams['image_columns']:
-            # get the base uri from the column metadata and remove the the scheme portion
-            base_path = self._get_column_base_path(inputs, col).split('://')[1]
-            self.image_paths.extend([os.path.join(base_path, c) for c in inputs[col]])
+        image_cols =inputs.metadata.get_columns_with_semantic_type('https://metadata.datadrivendiscovery.org/types/FileName')
+        base_paths = [inputs.metadata.query((metadata_base.ALL_ELEMENTS, t))['location_base_uris'][0].replace('file:///', '/') for t in image_cols]
+        self.image_paths = np.array([[os.path.join(base_path, filename) for filename in inputs.iloc[:,col]] for base_path, col in zip(base_paths, image_cols)]).flatten()
 
         # broadcast image labels for each column of images
         self.targets = inputs.metadata.get_columns_with_semantic_type('https://metadata.datadrivendiscovery.org/types/TrueTarget')
@@ -186,29 +173,29 @@ class gator(PrimitiveBase[Inputs, Outputs, Params, Hyperparams]):
 
         # train label encoder
         self.encoder = LabelEncoder().fit(inputs.iloc[:,self.targets[0]])
-        self.image_labels = self.encoder.transform(np.repeat(inputs.iloc[:,self.targets[0]], len(self.hyperparams['image_columns'])))
+        self.image_labels = self.encoder.transform(np.repeat(inputs.iloc[:,self.targets[0]], len(image_cols)))
 
         # calculate class weights for target labels if desired
         if self.hyperparams['include_class_weights']:
-            self.class_weights = dict(inputs.iloc[:,targets[0]].value_counts())
-            if len(self.hyperparams['image_columns']) > 1:
-                self.class_weights.update((k, v * len(self.hyperparams['image_columns'])) for k, v in self.class_weights.items())
+            self.class_weights = dict(inputs.iloc[:,self.targets[0]].value_counts())
+            self.class_weights = {int(k): v * len(image_cols) for k, v in self.class_weights.items()}
 
     def fit(self, *, timeout: float = None, iterations: int = None) -> CallResult[None]:
         '''
             Trains a single Inception model on all columns of image paths using dataframe's target column
         '''
+        print('finetuning begins!', file = sys.__stdout__)
         self.ImageNet.finetune(
             self.image_paths, 
             self.image_labels,
             nclasses = len(self.encoder.classes_),
             batch_size = self.hyperparams['batch_size'],
             pooling = self.hyperparams['pooling'],
-            top_layer_epochs = self.hyperparams['last_layer_epochs'],
-            all_layer_epochs = self.hyperparams['last_block_epochs'],
+            top_layer_epochs = self.hyperparams['top_layer_epochs'],
+            all_layer_epochs = self.hyperparams['all_layer_epochs'],
             frozen_layer_count = self.hyperparams['frozen_layer_count'],
             class_weight = self.class_weights)
-
+        print('finetuning ends!', file = sys.__stdout__)
     def produce(self, *, inputs: Inputs, timeout: float = None, iterations: int = None) -> CallResult[Outputs]:
         """
             Produce image object classification predictions

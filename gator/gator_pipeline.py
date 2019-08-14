@@ -1,6 +1,7 @@
 from d3m import index
 from d3m.metadata.base import ArgumentType, Context
 from d3m.metadata.pipeline import Pipeline, PrimitiveStep
+import sys
 
 # Creating pipeline
 pipeline_description = Pipeline(context=Context.TESTING)
@@ -22,7 +23,8 @@ pipeline_description.add_step(step_1)
 # Step 2: Gator primitive
 step_2 = PrimitiveStep(primitive=index.get_primitive('d3m.primitives.digital_image_processing.imagenet_convolutional_neural_network.Gator'))
 step_2.add_argument(name='inputs', argument_type=ArgumentType.CONTAINER, data_reference='steps.1.produce')
-step_2.add_hyperparameter(name='image_columns', argument_type= ArgumentType.VALUE, data=['image'])
+step_2.add_argument(name='outputs', argument_type=ArgumentType.CONTAINER, data_reference='steps.1.produce')
+step_2.add_hyperparameter(name='image_columns', argument_type= ArgumentType.VALUE, data=['filename'])
 step_2.add_output('produce')
 pipeline_description.add_step(step_2)
 
