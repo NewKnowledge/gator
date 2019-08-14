@@ -13,23 +13,30 @@ step_0.add_argument(name='inputs', argument_type=ArgumentType.CONTAINER, data_re
 step_0.add_output('produce')
 pipeline_description.add_step(step_0)
 
-# Step 1: dataset_to_dataframe
-step_1 = PrimitiveStep(primitive=index.get_primitive('d3m.primitives.data_transformation.dataset_to_dataframe.Common'))
+# Step 1: Dataset sample primitive to reduce computation time
+step_1 = PrimitiveStep(primitive=index.get_primitive('d3m.primitives.data_preprocessing.dataset_sample.Common'))
 step_1.add_argument(name='inputs', argument_type=ArgumentType.CONTAINER, data_reference='steps.0.produce')
-step_1.add_hyperparameter(name='dataframe_resource', argument_type= ArgumentType.VALUE, data='learningData')
+step_1.add_hyperparameter(name='sample_size', argument_type= ArgumentType.VALUE, data=10000)
 step_1.add_output('produce')
 pipeline_description.add_step(step_1)
 
-# Step 2: Gator primitive
-step_2 = PrimitiveStep(primitive=index.get_primitive('d3m.primitives.digital_image_processing.imagenet_convolutional_neural_network.Gator'))
+# Step 1: dataset_to_dataframe
+step_2 = PrimitiveStep(primitive=index.get_primitive('d3m.primitives.data_transformation.dataset_to_dataframe.Common'))
 step_2.add_argument(name='inputs', argument_type=ArgumentType.CONTAINER, data_reference='steps.1.produce')
-step_2.add_argument(name='outputs', argument_type=ArgumentType.CONTAINER, data_reference='steps.1.produce')
-step_2.add_hyperparameter(name='image_columns', argument_type= ArgumentType.VALUE, data=['filename'])
+step_2.add_hyperparameter(name='dataframe_resource', argument_type= ArgumentType.VALUE, data='learningData')
 step_2.add_output('produce')
 pipeline_description.add_step(step_2)
 
+# Step 2: Gator primitive
+step_3 = PrimitiveStep(primitive=index.get_primitive('d3m.primitives.digital_image_processing.imagenet_convolutional_neural_network.Gator'))
+step_3.add_argument(name='inputs', argument_type=ArgumentType.CONTAINER, data_reference='steps.2.produce')
+step_3.add_argument(name='outputs', argument_type=ArgumentType.CONTAINER, data_reference='steps.2.produce')
+step_3.add_hyperparameter(name='image_columns', argument_type= ArgumentType.VALUE, data=['filename'])
+step_3.add_output('produce')
+pipeline_description.add_step(step_3)
+
 # Final Output
-pipeline_description.add_output(name='output predictions', data_reference='steps.2.produce')
+pipeline_description.add_output(name='output predictions', data_reference='steps.3.produce')
 
 # Output json pipeline
 blob = pipeline_description.to_json()

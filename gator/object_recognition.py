@@ -196,6 +196,7 @@ class gator(PrimitiveBase[Inputs, Outputs, Params, Hyperparams]):
             frozen_layer_count = self.hyperparams['frozen_layer_count'],
             class_weight = self.class_weights)
         print('finetuning ends!', file = sys.__stdout__)
+        
     def produce(self, *, inputs: Inputs, timeout: float = None, iterations: int = None) -> CallResult[Outputs]:
         """
             Produce image object classification predictions
