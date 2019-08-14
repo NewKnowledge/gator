@@ -9,7 +9,7 @@ setup(
     keywords=['d3m_primitive'],
     install_requires=[
         'pandas == 0.23.4',        
-        'nk_imagenet @ git+https://github.com/NewKnowledge/imagenet.git@3fa8b9149c73e5cef6e4ad3107f43204a43f20d0#egg=nk_imagenet'
+        'nk_imagenet @ git+https://github.com/NewKnowledge/imagenet.git@7775abf69ba65bcf434f02eea41780ee146fa74f#egg=nk_imagenet'
     ],
     entry_points={
         'd3m.primitives': [
