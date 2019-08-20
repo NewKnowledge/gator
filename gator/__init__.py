@@ -1,1 +1,1 @@
-from .object_recognition import gator
+from .gator import gator

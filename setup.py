@@ -13,7 +13,7 @@ setup(
     ],
     entry_points={
         'd3m.primitives': [
-            'digital_image_processing.imagenet_convolutional_neural_network.Gator = object_recognition:gator'
+            'digital_image_processing.imagenet_convolutional_neural_network.Gator = gator:gator'
         ],
     }
 )
