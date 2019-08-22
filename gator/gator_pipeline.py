@@ -16,7 +16,7 @@ pipeline_description.add_step(step_0)
 # Step 1: Dataset sample primitive to reduce computation time
 step_1 = PrimitiveStep(primitive=index.get_primitive('d3m.primitives.data_preprocessing.dataset_sample.Common'))
 step_1.add_argument(name='inputs', argument_type=ArgumentType.CONTAINER, data_reference='steps.0.produce')
-step_1.add_hyperparameter(name='sample_size', argument_type= ArgumentType.VALUE, data=10000)
+step_1.add_hyperparameter(name='sample_size', argument_type= ArgumentType.VALUE, data=20000)
 step_1.add_output('produce')
 pipeline_description.add_step(step_1)
 
@@ -31,7 +31,6 @@ pipeline_description.add_step(step_2)
 step_3 = PrimitiveStep(primitive=index.get_primitive('d3m.primitives.digital_image_processing.imagenet_convolutional_neural_network.Gator'))
 step_3.add_argument(name='inputs', argument_type=ArgumentType.CONTAINER, data_reference='steps.2.produce')
 step_3.add_argument(name='outputs', argument_type=ArgumentType.CONTAINER, data_reference='steps.2.produce')
-step_3.add_hyperparameter(name='image_columns', argument_type= ArgumentType.VALUE, data=['filename'])
 step_3.add_output('produce')
 pipeline_description.add_step(step_3)
 

@@ -35,14 +35,14 @@ class Hyperparams(hyperparams.Hyperparams):
     top_layer_epochs = hyperparams.UniformInt(
         lower = 1, 
         upper = sys.maxsize,
-        default = 100, 
+        default = 10, 
         semantic_types=['https://metadata.datadrivendiscovery.org/types/TuningParameter'], 
         description = 'number of epochs to finetune top layer'
     )
     all_layer_epochs = hyperparams.UniformInt(
         lower = 1, 
         upper = sys.maxsize,
-        default = 10, 
+        default = 50, 
         semantic_types=['https://metadata.datadrivendiscovery.org/types/TuningParameter'], 
         description = 'number of epochs to finetune top m - n layers, where m is total number of layers'
     )
@@ -161,7 +161,7 @@ class gator(PrimitiveBase[Inputs, Outputs, Params, Hyperparams]):
             self.targets = inputs.metadata.get_columns_with_semantic_type('https://metadata.datadrivendiscovery.org/types/SuggestedTarget')
 
         # assert that the number of image columns is less than or equal to the number of target columns in the df
-        assert len(self.hyperparams['image_columns']) <= len(self.targets), "List of image columns cannot be longer than list of target columns"
+        assert len(image_cols) <= len(self.targets), "List of image columns cannot be longer than list of target columns"
 
         # train label encoder
         self.encoder = LabelEncoder().fit(inputs.iloc[:,self.targets[0]])
@@ -169,8 +169,7 @@ class gator(PrimitiveBase[Inputs, Outputs, Params, Hyperparams]):
 
         # calculate class weights for target labels if desired
         if self.hyperparams['include_class_weights']:
-            self.class_weights = dict(inputs.iloc[:,self.targets[0]].value_counts())
-            self.class_weights = {int(k): v * len(image_cols) for k, v in self.class_weights.items()}
+           self.class_weights = dict(pd.Series(self.image_labels).value_counts())
 
     def fit(self, *, timeout: float = None, iterations: int = None) -> CallResult[None]:
         '''
