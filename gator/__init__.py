@@ -1,1 +1,1 @@
-from .object_recognition import predict, init
+from .gator import gator

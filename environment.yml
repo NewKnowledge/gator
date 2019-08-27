@@ -5,5 +5,5 @@ dependencies:
 - pytest
 - pandas
 - pip:
-  - git+https://github.com/NewKnowledge/imagenet.git@24e605be4f32336ab888f48ae37da95a3dd5d1df#egg=nk_imagenet
+  - git+https://github.com/NewKnowledge/imagenet.git@ee53b6357465c19140fd18172a1eb7aa008986da#egg=nk_imagenet
 
