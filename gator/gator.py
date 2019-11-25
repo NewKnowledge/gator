@@ -5,79 +5,106 @@ import numpy as np
 import pandas as pd
 import time
 from d3m.primitive_interfaces.base import CallResult, PrimitiveBase
-from nk_imagenet import ImagenetModel
+from nk_imagenet.imagenet import ImagenetModel, ImageNetGen
+from nk_imagenet.utils import image_array_from_path
+from d3m.primitive_interfaces.supervised_learning import SupervisedLearnerPrimitiveBase
+from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras.optimizers import SGD
 
 from d3m import container, utils
-from d3m.container import DataFrame as d3m_DataFrame
 from d3m.metadata import hyperparams, base as metadata_base, params
 from common_primitives import utils as utils_cp
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder 
+import logging
+from d3m.exceptions import PrimitiveNotFittedError
 
 __author__ = 'Distil'
-__version__ = '1.0.1'
-__contact__ = 'mailto:nklabs@newknowledge.io'
+__version__ = '1.0.2'
+__contact__ = 'mailto:jeffrey.gleason@yonder.co'
 
 Inputs = container.pandas.DataFrame
 Outputs = container.pandas.DataFrame
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 class Params(params.Params):
     pass
 
 class Hyperparams(hyperparams.Hyperparams):
-    batch_size = hyperparams.UniformInt(
-        lower = 1, 
-        upper = 256,
-        upper_inclusive=True, 
-        default = 16, 
-        semantic_types=['https://metadata.datadrivendiscovery.org/types/TuningParameter'], 
-        description = 'batch size'
-    )
-    top_layer_epochs = hyperparams.UniformInt(
-        lower = 1, 
-        upper = sys.maxsize,
-        default = 10, 
-        semantic_types=['https://metadata.datadrivendiscovery.org/types/TuningParameter'], 
-        description = 'number of epochs to finetune top layer'
-    )
-    all_layer_epochs = hyperparams.UniformInt(
-        lower = 1, 
-        upper = sys.maxsize,
-        default = 50, 
-        semantic_types=['https://metadata.datadrivendiscovery.org/types/TuningParameter'], 
-        description = 'number of epochs to finetune top m - n layers, where m is total number of layers'
-    )
-    frozen_layer_count = hyperparams.UniformInt(
-        lower = 1, 
-        upper = sys.maxsize,
-        default = 249, 
-        semantic_types=['https://metadata.datadrivendiscovery.org/types/TuningParameter'], 
-        description = 'number of layers, n, to keep frozen'
-    )
     pooling = hyperparams.Enumeration(
         default = 'avg', 
         semantic_types = ['https://metadata.datadrivendiscovery.org/types/TuningParameter'],
         values = ['avg', 'max'],
         description = 'whether to use average or max pooling to transform 4D ImageNet features to 2D output'
     )
+    dense_dim = hyperparams.UniformInt(
+        lower = 128, 
+        upper = 4096,
+        upper_inclusive=True, 
+        default = 1024, 
+        semantic_types=['https://metadata.datadrivendiscovery.org/types/TuningParameter'], 
+        description = 'dimension of classification head (1 single dense layer)'
+    )
+    batch_size = hyperparams.UniformInt(
+        lower = 1, 
+        upper = 256,
+        upper_inclusive=True, 
+        default = 32, 
+        semantic_types=['https://metadata.datadrivendiscovery.org/types/TuningParameter'], 
+        description = 'batch size'
+    )
+    top_layer_epochs = hyperparams.UniformInt(
+        lower = 1, 
+        upper = sys.maxsize,
+        default = 1, 
+        semantic_types=['https://metadata.datadrivendiscovery.org/types/TuningParameter'], 
+        description = 'how many epochs for which to finetune classification head (happens first)'
+    )
+    all_layer_epochs = hyperparams.UniformInt(
+        lower = 1, 
+        upper = sys.maxsize,
+        default = 1, 
+        semantic_types=['https://metadata.datadrivendiscovery.org/types/TuningParameter'], 
+        description = 'how many epochs for which to finetune entire model (happens second)'
+    )
+    unfreeze_proportions = hyperparams.Set(
+        elements=hyperparams.Hyperparameter[int](-1),
+        default=(),
+        semantic_types=['https://metadata.datadrivendiscovery.org/types/TuningParameter'],
+        description="""list of proportions representing how much of the base ImageNet model one wants to
+                    unfreeze (later layers unfrozen) for another round of finetuning"""
+    )
+    early_stopping_patience = hyperparams.UniformInt(
+        lower = 0, 
+        upper = sys.maxsize, 
+        default = 5, 
+        semantic_types=['https://metadata.datadrivendiscovery.org/types/TuningParameter'], 
+        description = """number of epochs to wait before invoking early stopping criterion. applied to all 
+            iterations of finetuning""")
+    val_split = hyperparams.Uniform(
+        lower = 0.0, 
+        upper = 1.0, 
+        default = 0.2, 
+        semantic_types=['https://metadata.datadrivendiscovery.org/types/TuningParameter'], 
+        description = 'proportion of training records to set aside for validation. Ignored \
+            if iterations flag in `fit` method is not None')
     include_class_weights = hyperparams.UniformBool(
         default = True, 
         semantic_types = ['https://metadata.datadrivendiscovery.org/types/TuningParameter'],
         description="whether to include class weights in finetuning of ImageNet model"
     )
 
-
-class gator(PrimitiveBase[Inputs, Outputs, Params, Hyperparams]):
+class gator(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, Hyperparams]):
     """
-        Produce image classification predictions by clustering an Inception model
-        finetuned on all columns of images in the dataset (assumption = single column of target labels)
+        Produce image classification predictions by iteratively finetuning an Inception V3 model
+        trained on ImageNet (can have multiple columns of images, but assumption is that there is a
+        single column of target labels, these labels are broadcast to all images by row)
 
-        Parameters
-        ----------
-        inputs : d3m dataframe with columns of image paths and optional labels
+        Training inputs: 1) Feature dataframe, 2) Label dataframe
+        Outputs: Dataframe with predictions
 
-        Returns
-        -------
-        output : A dataframe with image labels/classifications/cluster assignments
     """
 
     metadata = metadata_base.PrimitiveMetadata({
@@ -114,11 +141,11 @@ class gator(PrimitiveBase[Inputs, Outputs, Params, Hyperparams]):
             },
         ],
         # The same path the primitive is registered with entry points in setup.py.
-        'python_path': 'd3m.primitives.digital_image_processing.imagenet_convolutional_neural_network.Gator',
+        'python_path': 'd3m.primitives.digital_image_processing.convolutional_neural_net.Gator',
         # Choose these from a controlled vocabulary in the schema. If anything is missing which would
         # best describe the primitive, make a merge request.
         "algorithm_types": [
-            metadata_base.PrimitiveAlgorithmType.IMAGENET_CONVOLUTIONAL_NEURAL_NETWORK
+            metadata_base.PrimitiveAlgorithmType.CONVOLUTIONAL_NEURAL_NETWORK
         ],
         "primitive_family": metadata_base.PrimitiveFamily.DIGITAL_IMAGE_PROCESSING
     })
@@ -126,7 +153,16 @@ class gator(PrimitiveBase[Inputs, Outputs, Params, Hyperparams]):
     def __init__(self, *, hyperparams: Hyperparams, random_seed: int = 0, volumes: typing.Dict[str,str]=None)-> None:
 
         super().__init__(hyperparams=hyperparams, random_seed=random_seed, volumes=volumes)
-        self.ImageNet = ImagenetModel(weights = self.volumes["gator_weights"], pooling = self.hyperparams['pooling'])
+
+        # create ImageNet base model
+        self.ImageNet = ImagenetModel(
+            weights = self.volumes["gator_weights"], 
+            pooling = self.hyperparams['pooling'])
+        self.ImageNet.create_finetune_model( 
+                pooling = self.hyperparams['pooling'],
+                dense_dim = self.hyperparams['dense_dim'],
+                nclasses = 2,
+        )
         self.image_paths = None
         self.image_labels = None
         self.class_weights = None
@@ -144,97 +180,196 @@ class gator(PrimitiveBase[Inputs, Outputs, Params, Hyperparams]):
             
             Parameters
             ----------
-            inputs: column(s) of image paths
+            inputs: feature dataframe
             outputs: labels from dataframe's target column
         '''
+
+        self.output_columns = outputs.columns
         
         # create single list of image paths from all target image columns
-        image_cols =inputs.metadata.get_columns_with_semantic_type('https://metadata.datadrivendiscovery.org/types/FileName')
-        base_paths = [inputs.metadata.query((metadata_base.ALL_ELEMENTS, t))['location_base_uris'][0].replace('file:///', '/') for t in image_cols]
-        self.image_paths = np.array([[os.path.join(base_path, filename) for filename in inputs.iloc[:,col]] for base_path, col in zip(base_paths, image_cols)]).flatten()
+        image_cols = inputs.metadata.get_columns_with_semantic_type('http://schema.org/ImageObject')
+        base_paths = [inputs.metadata.query((metadata_base.ALL_ELEMENTS, t))['location_base_uris'][0].replace('file:///', '/') 
+            for t in image_cols]
+        image_paths = np.array([[os.path.join(base_path, filename) 
+            for filename in inputs.iloc[:,col]] 
+            for base_path, col in zip(base_paths, image_cols)]).flatten()
+
+        # preprocess images for ImageNet model 
+        images_array = \
+            np.array([image_array_from_path(fpath, target_size=self.ImageNet.target_size) for fpath in image_paths])
+        logger.debug(f'preprocessing {images_array.shape[0]} images')
+        if images_array.ndim != 4:
+            raise Exception('invalid input shape for images_array, expects a 4d array')
+        self._X_train = self.ImageNet.preprocess(images_array)
 
         # broadcast image labels for each column of images
-        self.targets = inputs.metadata.get_columns_with_semantic_type('https://metadata.datadrivendiscovery.org/types/TrueTarget')
-        if not len(self.targets):
-            self.targets = inputs.metadata.get_columns_with_semantic_type('https://metadata.datadrivendiscovery.org/types/Target')
-        if not len(self.targets):
-            self.targets = inputs.metadata.get_columns_with_semantic_type('https://metadata.datadrivendiscovery.org/types/SuggestedTarget')
-
-        # assert that the number of image columns is less than or equal to the number of target columns in the df
-        assert len(image_cols) <= len(self.targets), "List of image columns cannot be longer than list of target columns"
+        if outputs.shape[1] > 1:
+            raise ValueError('There are multiple columns labeled as target, but this primitive expects only one')
 
         # train label encoder
-        self.encoder = LabelEncoder().fit(inputs.iloc[:,self.targets[0]])
-        self.image_labels = self.encoder.transform(np.repeat(inputs.iloc[:,self.targets[0]], len(image_cols)))
+        self.encoder = LabelEncoder().fit(outputs.values.ravel())
+        image_labels = \
+            self.encoder.transform(np.repeat(outputs.values.ravel(), len(image_cols)))
+        self._y_train = to_categorical(image_labels)
 
         # calculate class weights for target labels if desired
         if self.hyperparams['include_class_weights']:
            self.class_weights = dict(pd.Series(self.image_labels).value_counts())
 
+        # create finetuning model
+        self.ImageNet.create_finetune_model( 
+            pooling = self.hyperparams['pooling'],
+            dense_dim = self.hyperparams['dense_dim'],
+            nclasses = len(self.encoder.classes_),
+        )
+
+        # save weights so we can start fitting from scratch (if desired by caller)
+        self.ImageNet.finetune_model.save_weights('model_initial_weights.h5')
+
+        # mark that new training data has been set
+        self._new_train_data = True
+
     def fit(self, *, timeout: float = None, iterations: int = None) -> CallResult[None]:
         '''
             Trains a single Inception model on all columns of image paths using dataframe's target column
         '''
+
+        # restore initial model weights if new training data
+        if self._new_train_data:
+            self.ImageNet.finetune_model.load_weights('model_initial_weights.h5')
+
+        # break out validation set if iterations arg not set
+        if iterations is None:
+            iterations_set = False
+            train_split = 1 - self.hyperparams['val_split'] * self._X_train.shape[0]
+            x_train = self._X_train[:int(train_split)]
+            y_train = self._y_train[:int(train_split)]
+            x_val = self._X_train[int(train_split):]
+            y_val = self._y_train[int(train_split):]
+            val_dataset = ImageNetGen(x_val, 
+                y = y_val, 
+                batch_size = self.hyperparams['batch_size'])
+            top_layer_iterations = self.hyperparams['top_layer_epochs']
+            all_layer_iterations = self.hyperparams['all_layer_epochs']
+            callbacks = [EarlyStopping(monitor='val_loss', 
+                patience=self.hyperparams['early_stopping_patience'], 
+                restore_best_weights=False)]   
+        else:
+            iterations_set = True
+            top_layer_iterations = iterations
+            all_layer_iterations = iterations
+            x_train = self._X_train
+            y_train = self._y_train
+            val_dataset = None
+            callbacks = None
+        train_dataset = ImageNetGen(x_train, 
+            y = y_train, 
+            batch_size = self.hyperparams['batch_size'])
+
+        # time training for 1 epoch so we can consider timeout argument thoughtfully
+        if timeout:
+            logger.info('Timing the fitting procedure for one epoch so we \
+                can consider timeout thoughtfully')
+            start_time = time.time()
+            fitting_histories = self.ImageNet.finetune(train_dataset, 
+                val_dataset = val_dataset, 
+                top_layer_epochs = 1,
+                unfreeze_proportions = self.hyperparams['unfreeze_proportions'],
+                all_layer_epochs = 1, 
+                class_weight = self.class_weights,
+                optimizer_top = 'rmsprop',
+                optimizer_full = SGD(lr=0.0001, momentum=0.9),
+                callbacks = callbacks)
+            epoch_time_estimate = time.time() - start_time
+
+            # (1 + len(self.hyperparams['unfreeze_proportions'])) how many times we will call 'fit' on model
+            timeout_epochs = \
+                timeout // ((1 + len(self.hyperparams['unfreeze_proportions'])) * epoch_time_estimate) - 1 # subract 1 more to be safe
+            top_layer_iters = min(timeout_epochs, top_layer_iterations)
+            all_layer_iters = min(timeout_epochs, all_layer_iterations)
+
+            # reset weights to initial values because we don't actually want to use these updates
+            self.ImageNet.finetune_model.load_weights('model_initial_weights.h5')
+
+        else:
+            top_layer_iters = top_layer_iterations
+            all_layer_iters = all_layer_iterations
+            start_epoch = 0
+
+        # normal fitting 
         start_time = time.time()
-        print('finetuning begins!', file = sys.__stdout__)
-        self.ImageNet.finetune(
-            self.image_paths, 
-            self.image_labels,
-            nclasses = len(self.encoder.classes_),
-            batch_size = self.hyperparams['batch_size'],
-            pooling = self.hyperparams['pooling'],
-            top_layer_epochs = self.hyperparams['top_layer_epochs'],
-            all_layer_epochs = self.hyperparams['all_layer_epochs'],
-            frozen_layer_count = self.hyperparams['frozen_layer_count'],
-            class_weight = self.class_weights)
-        print(f'finetuning ends!. it took {time.time()-start_time} seconds', file = sys.__stdout__)
-        return CallResult(None)        
+        logger.info('finetuning begins!')
+        fitting_histories = self.ImageNet.finetune(train_dataset, 
+            val_dataset = val_dataset, 
+            top_layer_epochs = top_layer_iters,
+            unfreeze_proportions = self.hyperparams['unfreeze_proportions'],
+            all_layer_epochs = all_layer_iters, 
+            class_weight = self.class_weights,
+            optimizer_top = 'rmsprop',
+            optimizer_full = SGD(lr=0.0001, momentum=0.9),
+            callbacks = callbacks)
+        iterations_completed = sum([len(h.history['loss']) for h in fitting_histories])
+        logger.info(f'finetuning ends!. it took {time.time()-start_time} seconds')
+
+        # maintain primitive state (mark that training data has been used)
+        self._new_train_data = False
+        self._is_fit = True
+
+        # use fitting history to set CallResult return values
+        if iterations_set:
+            has_finished = False
+        elif top_layer_iters < top_layer_iterations or all_layer_iters < all_layer_iterations:
+            has_finished = False
+        else:
+            has_finished = self._is_fit
+
+        return CallResult(None, has_finished = has_finished, iterations_done = iterations_completed)
+
     def produce(self, *, inputs: Inputs, timeout: float = None, iterations: int = None) -> CallResult[Outputs]:
         """
             Produce image object classification predictions
 
             Parameters
             ----------
-            inputs : d3m dataframe with columns of image paths and optional labels
+            inputs : feature dataframe
 
             Returns
             -------
             output : A dataframe with image labels/classifications/cluster assignments
         """
-    
-        # get metadata labels for primary key and target label columns
-        key = inputs.metadata.get_columns_with_semantic_type('https://metadata.datadrivendiscovery.org/types/PrimaryKey')
-        col_names = [inputs.metadata.query_column(key[0])['name']]
-        target_names = [inputs.metadata.query_column(idx)['name'] for idx in self.targets]
 
-        # create output dataframe
-        result_df = d3m_DataFrame(pd.DataFrame(columns=col_names.extend(target_names)))
-        result_df[col_names[0]] = inputs[col_names[0]]
-        col_dict = dict(result_df.metadata.query((metadata_base.ALL_ELEMENTS, 0)))
-        col_dict['structural_type'] = type(1)
-        col_dict['name'] = col_names[0]
-        col_dict['semantic_types'] = ('http://schema.org/Integer', 'https://metadata.datadrivendiscovery.org/types/PrimaryKey')
-        result_df.metadata = result_df.metadata.update((metadata_base.ALL_ELEMENTS, 0), col_dict)
+        if not self._is_fit:
+            raise PrimitiveNotFittedError("Primitive not fitted.")
+        
+        result_df = pd.DataFrame({})
 
-        image_cols =inputs.metadata.get_columns_with_semantic_type('https://metadata.datadrivendiscovery.org/types/FileName')
+        image_cols = inputs.metadata.get_columns_with_semantic_type('http://schema.org/ImageObject')
         for idx, col in enumerate(image_cols):
             base_path = inputs.metadata.query((metadata_base.ALL_ELEMENTS, col))['location_base_uris'][0].replace('file:///', '/')
             image_paths = np.array([os.path.join(base_path, filename) for filename in inputs.iloc[:,col]])
 
-            # make predictions on finetuned model and decode
-            preds = self.ImageNet.finetuned_predict(image_paths)
-            result_df[target_names[idx]] = self.encoder.inverse_transform(np.argmax(preds, axis=1))
+            # preprocess images for ImageNet model 
+            images_array = \
+                np.array([image_array_from_path(fpath, target_size=self.ImageNet.target_size) for fpath in image_paths])
+            logger.debug(f'preprocessing {images_array.shape[0]} images')
+            if images_array.ndim != 4:
+                raise Exception('invalid input shape for images_array, expects a 4d array')
+            X_test = self.ImageNet.preprocess(images_array)
+            test_dataset = ImageNetGen(X_test, 
+                batch_size = self.hyperparams['batch_size'])
 
-            # add metadata to column
-            col_dict = dict(result_df.metadata.query((metadata_base.ALL_ELEMENTS, idx+1)))
-            col_dict['structural_type'] = type(1)
-            col_dict['name'] = target_names[idx]
-            col_dict['semantic_types'] = ('http://schema.org/Integer', 
-                                        'https://metadata.datadrivendiscovery.org/types/SuggestedTarget', 
-                                        'https://metadata.datadrivendiscovery.org/types/TrueTarget', 
-                                        'https://metadata.datadrivendiscovery.org/types/Target')
-            result_df.metadata = result_df.metadata.update((metadata_base.ALL_ELEMENTS, idx+1), col_dict)
+            # make predictions on finetuned model and decode
+            preds = self.ImageNet.classify(test_dataset)
+            preds = self.encoder.inverse_transform(np.argmax(preds, axis=1))
+            result_df[self.output_columns[idx]] = preds
+
+        # create output frame with metadata
+        result_df = container.DataFrame(result_df, generate_metadata=True)
+        for i in range(result_df.shape[1]):
+            result_df.metadata = result_df.metadata.add_semantic_type((metadata_base.ALL_ELEMENTS, i), 
+                ('https://metadata.datadrivendiscovery.org/types/PredictedTarget'))
         
-        return CallResult(result_df)
+        # ok to set to True because we have checked that primitive has been fit
+        return CallResult(result_df, has_finished=True)
 
     
