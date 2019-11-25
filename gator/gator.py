@@ -27,7 +27,7 @@ Inputs = container.pandas.DataFrame
 Outputs = container.pandas.DataFrame
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+#logger.setLevel(logging.DEBUG)
 
 class Params(params.Params):
     pass
