@@ -15,7 +15,7 @@ pipeline_description.add_step(step_0)
 # Step 1: Dataset sample primitive to reduce computation time
 step_1 = PrimitiveStep(primitive=index.get_primitive('d3m.primitives.data_preprocessing.dataset_sample.Common'))
 step_1.add_argument(name='inputs', argument_type=ArgumentType.CONTAINER, data_reference='steps.0.produce')
-step_1.add_hyperparameter(name='sample_size', argument_type= ArgumentType.VALUE, data=25000)
+step_1.add_hyperparameter(name='sample_size', argument_type= ArgumentType.VALUE, data=10000)
 step_1.add_output('produce')
 pipeline_description.add_step(step_1)
 
@@ -56,6 +56,7 @@ pipeline_description.add_step(step_5)
 step_6 = PrimitiveStep(primitive=index.get_primitive('d3m.primitives.digital_image_processing.convolutional_neural_net.Gator'))
 step_6.add_argument(name='inputs', argument_type=ArgumentType.CONTAINER, data_reference='steps.4.produce')
 step_6.add_argument(name='outputs', argument_type=ArgumentType.CONTAINER, data_reference='steps.5.produce')
+step_6.add_hyperparameter(name='unfreeze_proportions', argument_type=ArgumentType.VALUE, data=[0.5])
 step_6.add_output('produce')
 pipeline_description.add_step(step_6)
 
