@@ -58,14 +58,14 @@ class Hyperparams(hyperparams.Hyperparams):
     top_layer_epochs = hyperparams.UniformInt(
         lower = 1, 
         upper = sys.maxsize,
-        default = 1, 
+        default = 10, 
         semantic_types=['https://metadata.datadrivendiscovery.org/types/TuningParameter'], 
         description = 'how many epochs for which to finetune classification head (happens first)'
     )
     all_layer_epochs = hyperparams.UniformInt(
         lower = 1, 
         upper = sys.maxsize,
-        default = 1, 
+        default = 10, 
         semantic_types=['https://metadata.datadrivendiscovery.org/types/TuningParameter'], 
         description = 'how many epochs for which to finetune entire model (happens second)'
     )
