@@ -70,7 +70,7 @@ class Hyperparams(hyperparams.Hyperparams):
         description = 'how many epochs for which to finetune entire model (happens second)'
     )
     unfreeze_proportions = hyperparams.Set(
-        elements=hyperparams.Hyperparameter[int](-1),
+        elements=hyperparams.Hyperparameter[float](-1),
         default=(),
         semantic_types=['https://metadata.datadrivendiscovery.org/types/TuningParameter'],
         description="""list of proportions representing how much of the base ImageNet model one wants to
